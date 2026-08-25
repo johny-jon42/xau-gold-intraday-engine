@@ -12,20 +12,20 @@ def normalize_ohlcv(df):
 def add_features(df):
     x=normalize_ohlcv(df)
     if x.empty:return x
-    tr=pd.concat([x.high-x.low,(x.high-x.close.shift()).abs(),(x.low-x.close.shift()).abs()],axis=1).max(axis=1)
+    tr=pd.concat([x['high']-x['low'],(x['high']-x['close'].shift()).abs(),(x['low']-x['close'].shift()).abs()],axis=1).max(axis=1)
     x["atr"]=tr.rolling(ATR_PERIOD).mean()
-    x["body"]=(x.close-x.open).abs()
-    x["range"]=x.high-x.low
-    x["body_ratio"]=np.where(x["range"]>0,x.body/x["range"],0)
-    x["bull"]=x.close>x.open; x["bear"]=x.close<x.open
-    x["swing_high"]=(x.high>x.high.shift(1))&(x.high>x.high.shift(2))&(x.high>x.high.shift(-1))&(x.high>x.high.shift(-2))
-    x["swing_low"]=(x.low<x.low.shift(1))&(x.low<x.low.shift(2))&(x.low<x.low.shift(-1))&(x.low<x.low.shift(-2))
+    x["body"]=(x['close']-x['open']).abs()
+    x["range"]=x['high']-x['low']
+    x["body_ratio"]=np.where(x["range"]>0,x['body']/x["range"],0)
+    x["bull"]=x['close']>x['open']; x["bear"]=x['close']<x['open']
+    x["swing_high"]=(x['high']>x['high'].shift(1))&(x['high']>x['high'].shift(2))&(x['high']>x['high'].shift(-1))&(x['high']>x['high'].shift(-2))
+    x["swing_low"]=(x['low']<x['low'].shift(1))&(x['low']<x['low'].shift(2))&(x['low']<x['low'].shift(-1))&(x['low']<x['low'].shift(-2))
     return x
 
 def structure(df):
     x=add_features(df)
     if x.empty:return {"bias":"UNKNOWN","bos":None,"choch":None,"last_high":None,"last_low":None}
-    last=x.iloc[-1]; highs=x.loc[x.swing_high,"high"]; lows=x.loc[x.swing_low,"low"]
+    last=x.iloc[-1]; highs=x.loc[x['swing_high'],"high"]; lows=x.loc[x['swing_low'],"low"]
     lh=highs.iloc[-1] if len(highs) else np.nan; ll=lows.iloc[-1] if len(lows) else np.nan
     ph=highs.iloc[-2] if len(highs)>=2 else np.nan; pl=lows.iloc[-2] if len(lows)>=2 else np.nan
     bb=bool(pd.notna(lh) and pd.notna(last.atr) and last.close>lh and last.close-lh>=MIN_BREAK_ATR*last.atr)
@@ -61,8 +61,8 @@ def detect_order_blocks(df):
     return out[-20:]
 
 def liquidity_levels(df):
-    x=add_features(df); highs=x.loc[x.swing_high,"high"].tolist(); lows=x.loc[x.swing_low,"low"].tolist()
-    atr_now=x.atr.iloc[-1] if len(x) else np.nan
+    x=add_features(df); highs=x.loc[x['swing_high'],"high"].tolist(); lows=x.loc[x['swing_low'],"low"].tolist()
+    atr_now=x['atr'].iloc[-1] if len(x) else np.nan
     eh,el=[],[]
     if pd.notna(atr_now):
         tol=EQUAL_LEVEL_ATR*atr_now
@@ -91,7 +91,7 @@ def detect_recent_sweep(df):
 def premium_discount(df):
     x=add_features(df)
     if x.empty:return None
-    hi=x.high.tail(100).max(); lo=x.low.tail(100).min(); mid=(hi+lo)/2; price=x.close.iloc[-1]
+    hi=x['high'].tail(100).max(); lo=x['low'].tail(100).min(); mid=(hi+lo)/2; price=x['close'].iloc[-1]
     return {"high":float(hi),"low":float(lo),"mid":float(mid),"zone":"DISCOUNT" if price<mid else "PREMIUM"}
 
 def analyze_timeframe(df):
