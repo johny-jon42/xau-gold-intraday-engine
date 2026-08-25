@@ -1,74 +1,109 @@
 from urllib.parse import quote_plus
+from datetime import datetime, timezone
+import re
 import pandas as pd
 import requests
 import feedparser
 import yfinance as yf
-
 from config import TIMEFRAMES
+
+
+def _flatten_columns(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+    x = df.copy()
+    if isinstance(x.columns, pd.MultiIndex):
+        # Identify OHLC names regardless of which MultiIndex level Yahoo used.
+        wanted = {"open", "high", "low", "close", "adj close", "volume"}
+        cols = []
+        for col in x.columns:
+            parts = [str(p) for p in col]
+            match = next((p for p in parts if p.strip().lower() in wanted), parts[0])
+            cols.append(match)
+        x.columns = cols
+    else:
+        x.columns = [str(c).strip() for c in x.columns]
+    # If duplicate OHLC columns remain, keep the first one.
+    x = x.loc[:, ~x.columns.duplicated(keep="first")]
+    rename = {c: c.lower().replace(" ", "_") for c in x.columns}
+    x = x.rename(columns=rename)
+    return x
+
 
 def get_ohlcv(symbol="XAUUSD=X"):
     out = {}
     for tf, cfg in TIMEFRAMES.items():
         try:
-            out[tf] = yf.download(
-                symbol,
-                period=cfg["period"],
-                interval=cfg["interval"],
-                progress=False,
-                auto_adjust=False,
-                threads=False,
-            )
+            raw = yf.download(symbol, period=cfg["period"], interval=cfg["interval"],
+                              progress=False, auto_adjust=False, threads=False)
+            out[tf] = _flatten_columns(raw)
         except Exception:
             out[tf] = pd.DataFrame()
     return out
 
-def google_news(query="gold OR XAUUSD OR Federal Reserve OR CPI OR NFP OR Treasury yields"):
+
+def google_news(query="gold OR XAUUSD OR Federal Reserve OR CPI OR NFP OR Treasury yields OR US dollar"):
     url = "https://news.google.com/rss/search?q=" + quote_plus(query) + "&hl=en-US&gl=US&ceid=US:en"
     try:
         feed = feedparser.parse(url)
-        return [{
-            "title": e.get("title", ""),
-            "link": e.get("link", ""),
-            "published": e.get("published", ""),
-            "summary": e.get("summary", "")
-        } for e in feed.entries[:30]]
+        return [{"title": e.get("title", ""), "link": e.get("link", ""),
+                 "published": e.get("published", ""), "summary": e.get("summary", "")}
+                for e in feed.entries[:50]]
     except Exception:
         return []
 
+
+# News score: direction + relevance + event importance. It is deliberately transparent,
+# not an AI sentiment claim and not a substitute for an economic calendar.
+BULL = {
+    "rate cut": 7, "rate cuts": 7, "dovish": 6, "falling yields": 6,
+    "lower yields": 6, "weaker dollar": 6, "weak dollar": 6,
+    "inflation cools": 6, "safe haven": 4, "geopolitical": 3,
+    "conflict": 3, "war": 3, "central bank buying": 4, "gold demand": 4,
+}
+BEAR = {
+    "rate hike": 7, "rate hikes": 7, "hawkish": 6, "rising yields": 6,
+    "higher yields": 6, "strong dollar": 6, "stronger dollar": 6,
+    "inflation rises": 6, "hot inflation": 6, "hawkish fed": 7,
+}
+IMPORTANT = {
+    "fomc": 1.6, "federal reserve": 1.5, "fed": 1.3, "cpi": 1.6,
+    "nonfarm payroll": 1.6, "nfp": 1.6, "jobs report": 1.5,
+    "pce": 1.5, "treasury yields": 1.4, "10-year yield": 1.4,
+    "dollar index": 1.3, "dxy": 1.3, "gold": 1.2, "xauusd": 1.3,
+}
+
 def news_score(items):
-    bullish = [
-        "dovish","rate cut","rate cuts","lower rates","falling yields",
-        "weak dollar","weaker dollar","inflation cools","geopolitical",
-        "war","conflict","recession","safe haven","gold demand","central bank buying"
-    ]
-    bearish = [
-        "hawkish","rate hike","rate hikes","higher rates","rising yields",
-        "strong dollar","stronger dollar","hot inflation","inflation rises",
-        "hawkish fed","yield surge"
-    ]
-    score = 0
+    total = 0.0
     details = []
     for item in items:
-        text = (item["title"] + " " + item["summary"]).lower()
-        b = sum(text.count(k) for k in bullish)
-        s = sum(text.count(k) for k in bearish)
-        if b or s:
-            delta = min(20, 4*b) - min(20, 4*s)
-            score += delta
-            details.append({"title": item["title"], "delta": delta})
-    return max(-100, min(100, score)), details
+        text = re.sub(r"<[^>]+>", " ", (item.get("title", "") + " " + item.get("summary", ""))).lower()
+        direction = 0.0
+        for k, v in BULL.items():
+            if k in text: direction += v
+        for k, v in BEAR.items():
+            if k in text: direction -= v
+        relevance = sum(mult for k, mult in IMPORTANT.items() if k in text)
+        if direction == 0 or relevance == 0:
+            continue
+        # Cap each headline so repeated syndicated wording cannot dominate the score.
+        delta = max(-15.0, min(15.0, direction * min(1.8, relevance / 2.0)))
+        total += delta
+        details.append({"title": item.get("title", ""), "delta": round(delta, 1),
+                        "published": item.get("published", ""), "link": item.get("link", "")})
+    total = max(-100.0, min(100.0, total))
+    details.sort(key=lambda z: abs(z["delta"]), reverse=True)
+    return round(total, 1), details
+
 
 def fred_series(series_id, api_key=None):
-    if not api_key:
-        return pd.DataFrame()
+    if not api_key: return pd.DataFrame()
     url = "https://api.stlouisfed.org/fred/series/observations"
-    params = {"series_id": series_id, "api_key": api_key, "file_type": "json", "sort_order":"desc", "limit":20}
+    params = {"series_id": series_id, "api_key": api_key, "file_type": "json", "sort_order": "desc", "limit": 20}
     try:
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
+        r = requests.get(url, params=params, timeout=10); r.raise_for_status()
         df = pd.DataFrame(r.json().get("observations", []))
-        if not df.empty:
-            df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        if not df.empty: df["value"] = pd.to_numeric(df["value"], errors="coerce")
         return df
     except Exception:
         return pd.DataFrame()
