@@ -1,73 +1,37 @@
-# XAU/USD Intraday Structure & News Engine
+# XAU/USD Intraday Engine — Phone Web App
 
-A free, rules-based prototype for automated XAU/USD analysis using 15m → 5m → 1m structure.
+This is a Streamlit web app for the XAU/USD rules engine.
 
-## What it detects
+## What it does
 
-- Swing highs/lows
-- Support/resistance zones
-- Liquidity pools and sweeps
-- BOS (Break of Structure)
-- CHoCH / MSS
+- 15m → 5m → 1m multi-timeframe analysis
+- BOS / CHoCH
+- Liquidity sweeps
 - Order blocks
-- Fair Value Gaps (FVG)
-- Displacement
+- FVG
 - Premium/discount
-- 15m → 5m → 1m confluence
-- Gold-related news from Google News RSS
-- DXY proxy and US 10Y yield context when available
-- 0–100 directional score
-- LONG / SHORT / WAIT
-- CSV signal journal
+- Gold news score
+- LONG / SHORT / WATCH / NO TRADE
+- Mobile-friendly dashboard
+- Candlestick chart
 
-## Data
+It does **not** place trades.
 
-The prototype uses Yahoo Finance through `yfinance` for market data. Yahoo Finance currently lists Gold at about $4,714.50 in the web interface, but exact XAU/USD availability and intraday history can vary by feed. The scanner therefore fails safely when a feed is unavailable.
+## Easiest deployment: Streamlit Community Cloud
 
-News is pulled from Google News RSS without a paid API key.
+1. Create a GitHub repository.
+2. Upload all files from this folder.
+3. Open Streamlit Community Cloud.
+4. Create a new app.
+5. Select the repository and `app.py`.
+6. Deploy.
+7. Open the generated HTTPS address from Chrome on your Android phone.
 
-For macro context, the optional FRED connector can use:
-- DTWEXBGS — nominal broad US dollar index
-- DGS10 — US 10-year Treasury yield
-
-FRED's API requires a free API key for direct API access, so the code makes this connector optional.
-
-## Install
-
-Python 3.11+ recommended.
+## Local test
 
 ```bash
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# macOS/Linux:
-source .venv/bin/activate
-
 pip install -r requirements.txt
+streamlit run app.py
 ```
 
-## Run
-
-One scan:
-
-```bash
-python main.py --once
-```
-
-Continuous scan every 60 seconds:
-
-```bash
-python main.py --loop 60
-```
-
-Web dashboard:
-
-```bash
-streamlit run dashboard.py
-```
-
-## Important
-
-This is an analysis and research engine, not an execution bot. It does not place trades.
-
-The detector rules are intentionally explicit so the strategy can be backtested and improved rather than relying on subjective chart interpretation.
+The app is designed to work with the existing `engine.py`, `data.py`, and `config.py` files.
