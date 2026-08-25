@@ -5,6 +5,7 @@ from xml.etree import ElementTree as ET
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 
 def atr(df, n=14):
@@ -152,6 +153,7 @@ def structure(df):
     return _structure_state(df)
 
 
+@st.cache_data(ttl=120, show_spinner=False)
 def news():
     urls=['https://www.forexfactory.com/calendar?day=today&format=rss','https://feeds.finance.yahoo.com/rss/2.0/headline?s=GC=F&region=US&lang=en-US']
     items=[]; score=0; risk=0
@@ -161,7 +163,7 @@ def news():
     bear_terms=['hawkish','rate hike','strong jobs','higher inflation','yield rose','real yields rose','strong dollar','dollar rose']
     for u in urls:
         try:
-            req=Request(u,headers={'User-Agent':'Mozilla/5.0'}); root=ET.fromstring(urlopen(req,timeout=5).read())
+            req=Request(u,headers={'User-Agent':'Mozilla/5.0'}); root=ET.fromstring(urlopen(req,timeout=3).read())
             for it in root.iter():
                 title=it.find('title')
                 if title is None or not title.text: continue
@@ -238,15 +240,16 @@ def _make_plan(direction,d5,d1,rr2,balance,risk_pct,contract_size,lot_step,min_l
 
 def _execution_state(direction,d5,d1):
     if direction not in ('LONG','SHORT'): return {'ready':False,'score':0,'checks':[]}
-    side='BULLISH' if direction=='LONG' else 'BEARISH'; sweep='SELL-SIDE' if direction=='LONG' else 'BUY-SIDE'
+    side='BULLISH' if direction=='LONG' else 'BEARISH'
+    sweep='SELL-SIDE' if direction=='LONG' else 'BUY-SIDE'
     checks=[]
     checks.append(('5m liquidity sweep', d5.get('sweep')==sweep))
     checks.append(('5m displacement', d5.get('displacement')=='YES'))
-    checks.append(('5m BOS/CHoCH', d5.get('bos')==direction or d5.get('choch')==direction))
+    checks.append(('5m BOS/CHoCH', d5.get('bos')==side or d5.get('choch')==side))
     checks.append(('5m POI', d5.get('fvg')==side or d5.get('ob')==side))
     checks.append(('1m liquidity sweep', d1.get('sweep')==sweep))
     checks.append(('1m displacement', d1.get('displacement')=='YES'))
-    checks.append(('1m BOS/CHoCH', d1.get('bos')==direction or d1.get('choch')==direction))
+    checks.append(('1m BOS/CHoCH', d1.get('bos')==side or d1.get('choch')==side))
     checks.append(('1m POI', d1.get('fvg')==side or d1.get('ob')==side))
     score=int(round(sum(ok for _,ok in checks)/len(checks)*100))
     return {'ready':score>=75,'score':score,'checks':checks}
@@ -274,17 +277,16 @@ def _replay_signal(d15,d5,d1,i5,rr2=2.5):
     if len(h15)<60 or len(hist5)<120: return None
     s15=structure(h15); s5=structure(hist5)
     direction='LONG' if s15['bias']=='BULLISH' else 'SHORT' if s15['bias']=='BEARISH' else None
-    if not direction or s5['bias'] not in (direction if direction in ('BULLISH','BEARISH') else 'RANGE', 'RANGE'): return None
-    direction='LONG' if s15['bias']=='BULLISH' else 'SHORT'
+    if not direction or s5['bias'] not in (('BULLISH' if direction=='LONG' else 'BEARISH'), 'RANGE'): return None
     # Require 5m setup ingredients before searching 1m execution.
     side='BULLISH' if direction=='LONG' else 'BEARISH'; sweep='SELL-SIDE' if direction=='LONG' else 'BUY-SIDE'
-    five_ok=(s5['sweep']==sweep and s5['displacement']=='YES' and (s5['bos']==direction or s5['choch']==direction) and (s5['fvg']==side or s5['ob']==side))
+    five_ok=(s5['sweep']==sweep and s5['displacement']=='YES' and (s5['bos']==side or s5['choch']==side) and (s5['fvg']==side or s5['ob']==side))
     if not five_ok: return None
     ts=d5.index[i5-1]
     prior1=d1[d1.index<=ts]
     if len(prior1)<120: return None
     s1=structure(prior1)
-    one_ok=(s1['sweep']==sweep and s1['displacement']=='YES' and (s1['bos']==direction or s1['choch']==direction) and (s1['fvg']==side or s1['ob']==side))
+    one_ok=(s1['sweep']==sweep and s1['displacement']=='YES' and (s1['bos']==side or s1['choch']==side) and (s1['fvg']==side or s1['ob']==side))
     if not one_ok: return None
     zones=_zones_for_direction(direction,s5,s1); zone=min(zones,key=lambda z:abs(z['mid']-s1['close'])) if zones else None
     entry=float(d1[d1.index>ts].iloc[0].Open) if not d1[d1.index>ts].empty else float(s1['close'])
@@ -299,9 +301,13 @@ def _replay_signal(d15,d5,d1,i5,rr2=2.5):
 
 def validation(data,rr2=2.5):
     d5=data.get('5m'); d1=data.get('1m')
-    if d5 is None or d1 is None or d5.empty or d1.empty: return {'status':'Missing 5m or 1m history; exact 15m→5m→1m validation cannot run.','trades':0}
+    if d5 is None or d1 is None or d5.empty or d1.empty:
+        return {'status':'Missing 5m or 1m history; validation cannot run.','trades':0}
     d5=d5.copy(); d1=d1.copy(); d5.index=pd.to_datetime(d5.index); d1.index=pd.to_datetime(d1.index)
-    if len(d5)<350 or len(d1)<350: return {'status':'Insufficient 5m/1m history for walk-forward validation.','trades':0}
+    # Bound research work so the mobile app does not spend minutes rebuilding thousands of structures.
+    d5=d5.tail(420); d1=d1.tail(2200)
+    if len(d5)<180 or len(d1)<300:
+        return {'status':'Insufficient recent 5m/1m history for validation.','trades':0}
     split=int(len(d5)*0.70); rows=[]
     for i in range(max(130,split),len(d5)-1):
         sig=_replay_signal(None,d5,d1,i,rr2)
@@ -311,23 +317,22 @@ def validation(data,rr2=2.5):
         direction=sig['direction']; entry=sig['entry']; sl=sig['sl']; tp=sig['tp']; result=None
         for _,r in future.iterrows():
             hi=float(r.High); lo=float(r.Low)
-            if direction=='LONG':
-                hs=lo<=sl; ht=hi>=tp
+            if direction=='LONG': hs=lo<=sl; ht=hi>=tp
             else: hs=hi>=sl; ht=lo<=tp
             if hs and ht: result=-1.0; break
             if hs: result=-1.0; break
             if ht: result=rr2; break
         if result is not None: rows.append({'time':sig['signal_time'],'r':result,'direction':direction,'oos':i>=split})
-    if not rows: return {'status':'No qualifying full 15m→5m→1m setups in this sample.','trades':0}
+    if not rows: return {'status':'No qualifying full 15m→5m→1m setups in the recent validation sample.','trades':0}
     x=pd.DataFrame(rows); ins=x[~x.oos]; o=x[x.oos]
     def stats(z):
         if z.empty: return {'trades':0,'win_rate':None,'net_r':0.0,'avg_r':None,'profit_factor':None,'max_dd_r':0.0,'long_trades':0,'short_trades':0}
-        eq=z.r.cumsum(); dd=eq-eq.cummax(); wins=float(z.loc[z.r>0,'r'].sum()); losses=abs(float(z.loc[z.r<0,'r'].sum()));
+        eq=z.r.cumsum(); dd=eq-eq.cummax(); wins=float(z.loc[z.r>0,'r'].sum()); losses=abs(float(z.loc[z.r<0,'r'].sum()))
         return {'trades':int(len(z)),'win_rate':round(float((z.r>0).mean()*100),1),'net_r':round(float(z.r.sum()),2),'avg_r':round(float(z.r.mean()),3),'profit_factor':round(wins/losses,2) if losses else None,'max_dd_r':round(float(dd.min()),2),'long_trades':int((z.direction=='LONG').sum()),'short_trades':int((z.direction=='SHORT').sum())}
-    return {'status':'Exact closed-bar 15m→5m→1m walk-forward research completed','in_sample':stats(ins),'out_of_sample':stats(o),'total':stats(x),'note':'Signals are generated only from completed candles. The first tradable 1m candle after confirmation is used for entry. If SL and TP occur inside the same 1m candle, the result is conservatively counted as SL. No live broker fills are assumed.'}
+    return {'status':'Closed-bar 15m→5m→1m walk-forward research completed','in_sample':stats(ins),'out_of_sample':stats(o),'total':stats(x),'note':'Recent bounded sample for mobile responsiveness. Signals use completed candles only; same-candle SL+TP is counted as SL. This is research, not proof of profitability.'}
 
 
-def analyze(data,rr2=2.5,news_hold=70,balance=10000,risk_pct=1.0,contract_size=100,lot_step=0.01,min_lot=0.01,spread=0.10,slippage=0.05):
+def analyze(data,rr2=2.5,news_hold=70,balance=10000,risk_pct=1.0,contract_size=100,lot_step=0.01,min_lot=0.01,spread=0.10,slippage=0.05,run_validation=False):
     d15=structure(data.get('15m')); d5=structure(data.get('5m')); d1=structure(data.get('1m')); n=news()
     source_ok=all('XAU spot' in data.get('source',{}).get(tf,'') for tf in ('15m','5m','1m'))
     required_ok=all(bool(data.get(tf) is not None and not data.get(tf).empty) for tf in ('15m','5m','1m'))
@@ -354,5 +359,5 @@ def analyze(data,rr2=2.5,news_hold=70,balance=10000,risk_pct=1.0,contract_size=1
     elif setup=='DATA HOLD': msg='Required 15m, 5m and 1m data are not all available. No trade plan is produced.'
     else: msg='Confirmed SMC execution sequence. Verify your broker price/spread and manually place the order.'
     lz=_watch_levels('LONG',d5,d1); sz=_watch_levels('SHORT',d5,d1)
-    val=validation(data,rr2)
+    val=validation(data,rr2) if run_validation else {'status':'Validation is OFF for fast live scanning. Enable it in the sidebar to run the bounded research test.'}
     return {'direction':direction,'confidence':conf,'setup_label':setup,'trade_plan':p,'trade_message':msg,'execution':exec_state,'triggers':{'long':lz,'short':sz},'news':n,'structure':{'15m':d15,'5m':d5,'1m':d1},'data_warning':data.get('warning',''),'source_line':data.get('source_line',''),'execution_grade':source_ok and required_ok,'validation':val}
