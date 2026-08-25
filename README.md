@@ -1,17 +1,16 @@
-# XAU/USD Intraday Engine V7
+# XAU/USD Intraday Engine V8
 
-SMC analysis-only dashboard for manual execution.
+Mobile Streamlit dashboard for manual XAU/USD analysis.
 
-**15m context → 5m confirmation → 1m execution**
+Pipeline: 15m context -> 5m SMC confirmation -> 1m execution.
 
 Features:
-- XAU spot / GC futures transparent fallback
-- SMC structure: BOS, CHoCH, liquidity sweeps, FVG, order blocks, premium/discount
-- Manual execution plan: Entry, SL, TP1, TP2, break-even trigger
-- Balance + risk percentage based position sizing
-- Editable XAU contract size (oz per 1.00 lot)
-- Entry/SL/TP/BE lines on the chart
-- News direction vs event-risk separation
-- No broker order execution
+- XAU spot with GC futures fallback
+- SMC-style BOS/CHoCH, liquidity sweeps, FVG and order blocks
+- Entry, stop, TP1, TP2, breakeven and position sizing from balance/risk
+- Directional news score and separate event-risk hold filter
+- Closed-bar walk-forward research validation with in-sample/out-of-sample stats
+- No broker connection and no automatic order placement
 
-Position sizing is an estimate. Broker contract specifications vary; verify contract size, tick value, spread, minimum lot, and margin requirements before placing a trade.
+## Important
+Broker contract size, tick value, spread and minimum lot differ. Verify them before manual execution. Research results are not a guarantee of profitability.

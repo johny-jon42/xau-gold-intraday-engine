@@ -6,8 +6,8 @@ from engine import analyze
 from data import load_all
 
 st.set_page_config(page_title="XAU/USD Intraday Engine V7", page_icon="🥇", layout="wide")
-st.title("🥇 XAU/USD Intraday Engine V7")
-st.caption("SMC: 15m context → 5m confirmation → 1m execution • analysis only")
+st.title("🥇 XAU/USD Intraday Engine V8")
+st.caption("SMC: 15m context → 5m confirmation → 1m execution • manual execution only")
 
 with st.sidebar:
     st.header("Trade setup")
@@ -37,6 +37,7 @@ st.caption(result["source_line"])
 if result["trade_plan"]:
     p=result["trade_plan"]
     st.subheader("🎯 EXECUTION TRADE PLAN")
+    st.caption("These are planning levels for manual execution in your broker. The app never sends orders.")
     st.success(f"{result['direction']} setup confirmed — execute manually only after the 1m confirmation candle closes.")
     c1,c2,c3,c4,c5,c6=st.columns(6)
     c1.metric("ENTRY", f'{p["entry"]:.2f}')
@@ -105,9 +106,21 @@ with tabs[2]:
     else: st.info("No news items were retrieved. Event-risk is therefore conservative.")
 
 with tabs[3]:
-    st.subheader("Closed-bar research validation")
-    st.caption("Research only. This is not proof of profitability and should not be used as a guarantee of future performance.")
-    st.write(result["validation"])
+    st.subheader("Closed-bar walk-forward validation")
+    st.caption("Research only. The test uses only information available before each entry; same-bar SL/TP is treated conservatively as an SL.")
+    v=result["validation"]
+    st.info(v.get("status","Unknown"))
+    if v.get("in_sample"):
+        a,b=st.columns(2)
+        with a:
+            st.markdown("### In-sample")
+            st.json(v["in_sample"])
+        with b:
+            st.markdown("### Out-of-sample")
+            st.json(v["out_of_sample"])
+        st.markdown("### Combined")
+        st.json(v["total"])
+    st.caption(v.get("note",""))
 
 with tabs[4]:
     st.markdown("""
