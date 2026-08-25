@@ -61,13 +61,14 @@ with tabs[0]:
             fig.add_hline(y=plan["tp2"],line_dash="dot",annotation_text="TP2")
         fig.update_layout(height=650,margin=dict(l=5,r=5,t=20,b=5),xaxis_rangeslider_visible=False,template="plotly_dark")
         st.plotly_chart(fig,use_container_width=True)
-    else: st.warning("No market data returned for this timeframe.")
+    else:
+        st.warning("No market data returned for this timeframe. The free Yahoo feed can temporarily omit 1m XAU/USD data; the engine will not fabricate candles.")
 
 with tabs[1]:
     cols=st.columns(3)
     for col,tf in zip(cols,["15m","5m","1m"]):
-        s=a[tf]["structure"]; col.subheader(tf); col.metric("Bias",s["bias"]); col.write("BOS:",s["bos"] or "—"); col.write("CHoCH:",s["choch"] or "—")
-        col.write("Liquidity sweep:",(a[tf]["sweep"] or {}).get("type","—")); col.write("Zone:",(a[tf]["premium_discount"] or {}).get("zone","—"))
+        s=a[tf]["structure"]; col.subheader(tf); col.metric("Bias",s["bias"]); col.write(f"BOS: {s['bos'] or '—'}"); col.write(f"CHoCH: {s['choch'] or '—'}")
+        col.write(f"Liquidity sweep: {(a[tf]['sweep'] or {}).get('type', '—')}"); col.write(f"Zone: {(a[tf]['premium_discount'] or {}).get('zone', '—')}")
     l,r=st.columns(2); l.markdown("**LONG reasons**"); [l.write("• "+x) for x in result["long_reasons"]]; r.markdown("**SHORT reasons**"); [r.write("• "+x) for x in result["short_reasons"]]
 
 with tabs[2]:

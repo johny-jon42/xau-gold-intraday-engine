@@ -30,15 +30,29 @@ def _flatten_columns(df):
     return x
 
 
+def _download_with_fallbacks(symbol, interval, periods):
+    last = pd.DataFrame()
+    for period in periods:
+        try:
+            raw = yf.download(symbol, period=period, interval=interval,
+                              progress=False, auto_adjust=False, threads=False)
+            x = _flatten_columns(raw)
+            if not x.empty:
+                return x
+            last = x
+        except Exception:
+            continue
+    return last
+
 def get_ohlcv(symbol="XAUUSD=X"):
     out = {}
+    period_fallbacks = {
+        "15m": ["60d", "30d", "10d"],
+        "5m": ["60d", "30d", "10d"],
+        "1m": ["7d", "5d", "3d", "1d"],
+    }
     for tf, cfg in TIMEFRAMES.items():
-        try:
-            raw = yf.download(symbol, period=cfg["period"], interval=cfg["interval"],
-                              progress=False, auto_adjust=False, threads=False)
-            out[tf] = _flatten_columns(raw)
-        except Exception:
-            out[tf] = pd.DataFrame()
+        out[tf] = _download_with_fallbacks(symbol, cfg["interval"], period_fallbacks.get(tf, [cfg["period"]]))
     return out
 
 
